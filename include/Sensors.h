@@ -1,9 +1,9 @@
 #pragma once
 
-#include <nrf_sdm.h>
-#include <nrf_soc.h>
+#include <LSM6DS3Sensor.h>
+#include <LIS3MDLSensor.h>
 
-#include "eigen.h"
+#include "Eigen.h"
 
 constexpr float kMagnetometerFullScale = 4;  // Gauss
 constexpr float kMagnetometerSensitivity =
@@ -30,11 +30,11 @@ constexpr float kAccelerometerSensitivity =
   //    -> (meter second^-2 / LSB)
   LSM6DS3_ACC_SENSITIVITY_FOR_FS_2G * 9.81 / 1000;
 
-constexpr float kGyroFullScale = 1000;
+constexpr float kGyroFullScale = 500;
 constexpr float kGyroSensitivity =
   // (10^-3 degree second^-1 / LSB) * (radian / degree) * (10^3)
   //    -> (radian second^-1 / LSB)
-  LSM6DS3_GYRO_SENSITIVITY_FOR_FS_1000DPS * (PI / 180) / 1000;
+  LSM6DS3_GYRO_SENSITIVITY_FOR_FS_500DPS * (PI / 180) / 1000;
 
 LSM6DS3Sensor AccGyr(&Wire, LSM6DS3_ACC_GYRO_I2C_ADDRESS_LOW);
 

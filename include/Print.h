@@ -1,9 +1,14 @@
 #pragma once
 
+#ifdef ARDUINO
 #include <Arduino.h>
+#else
+#include <iostream>
+#endif
 
 namespace bat {
 
+#ifdef ARDUINO
 struct {
   void begin() const {
     Serial.begin(115200);
@@ -18,5 +23,10 @@ struct {
     Serial.flush();
   }
 } constexpr print;
+#else  // ARDUINO
+template <typename... A> void print(A const &...args) {
+  (std::cout << ... << args) << std::endl;
+}
+#endif // ARDUINO
 
 } // namespace bat
