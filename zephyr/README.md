@@ -83,3 +83,10 @@ adafruit-nrfutil --verbose dfu serial \
 Well, I've opened a PR for it.
 https://github.com/zephyrproject-rtos/zephyr/pull/63819
 
+# zephyr errors list:
+- everything in the PR
+- xiao sense's default runner should be uf2 probably
+- lsm6dsl's example has typos:
+  - the escape code passed to printf is wrong. Should be \x1b[2J\x1b[H
+  - doesn't need to use printf or `CONFIG_STDOUT_CONSOLE=y`
+  - the sensor outputs radians per second rather than degrees

@@ -18,49 +18,86 @@ Adafruit_LIS3MDL lis3mdl;
 
 struct {
   int setup_line;
-  #define SETUP_LINE Status.setup_line = __LINE__
+  #define STATUS_LINE() Status.setup_line = __LINE__
   bool lsm6ds33 = false;
-  bool lsm6ds33_opts = false;
   bool lis3mdl = false;
-  bool lis3mdl_opts = false;
-  bool set_pixel = false;
 } Status;
 
-void setup() {
-  bat::begin_each(bat::print, bat::PIXEL, bat::BLE);
-  while (!Serial) {
-    delay(5);
-  }
-  bat::print("sensor driven mouse test");
+volatile bool disabled = false;
 
-  if (!lsm6ds33.begin_I2C()) {
-    Serial.println("Failed to find LSM6DS33 chip");
-    Serial.flush();
-    while (1) {
-      delay(10);
-    }
-  }
-  if (!lis3mdl.begin_I2C()) {
-    Serial.println("Failed to find LIS3MDL chip");
-    Serial.flush();
-    while (1) {
-      delay(10);
-    }
-  }
+void setup() {
+  STATUS_LINE();
+
+  bat::begin_each(bat::print, bat::PIXEL, bat::BLE);
+  STATUS_LINE();
+
+  Status.lsm6ds33 = lsm6ds33.begin_I2C();
+  STATUS_LINE();
+
+  Status.lis3mdl = lis3mdl.begin_I2C();
+  STATUS_LINE();
+
   lsm6ds33.setAccelDataRate(LSM6DS_RATE_208_HZ);
   lsm6ds33.setGyroDataRate(LSM6DS_RATE_208_HZ);
   lsm6ds33.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
   //lsm6ds33.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS);
   lsm6ds33.setGyroRange(LSM6DS_GYRO_RANGE_125_DPS);
+  lsm6ds33.highPassFilter(false, {});
+  STATUS_LINE();
 
   lis3mdl.setDataRate(LIS3MDL_DATARATE_300_HZ);
   lis3mdl.setPerformanceMode(LIS3MDL_ULTRAHIGHMODE);
+  STATUS_LINE();
 
-  bat::print(" ... finished sensor init");
   bat::PIXEL = { .red = 32, .green = 6 };
+  STATUS_LINE();
 
   auto* con = Bluefruit.Connection(Bluefruit.connHandle());
   con->requestConnectionParameter(6);
+  bat::BLE.HID->setKeyboardLedCallback([](uint16_t conn, uint8_t leds) {
+    disabled = leds & 2; // Use caps lock for now
+    if (Serial) {
+      bat::print(" led update: ", leds);
+    }
+  });
+
+  STATUS_LINE();
+}
+
+void first_print() {
+  if (not Serial) return;
+
+  static bool once = false;
+  if (once) return;
+  once = true;
+
+  bat::print("sensor driven mouse test");
+  bat::print("setup made it to line ", Status.setup_line);
+  if (not Status.lsm6ds33) {
+    bat::print("lsm6ds33 init failed");
+  } else {
+    switch (lsm6ds33.getGyroRange()) {
+    case LSM6DS_GYRO_RANGE_125_DPS:
+      bat::print("LSM6DS_GYRO_RANGE_125_DPS");
+      break;
+    case LSM6DS_GYRO_RANGE_250_DPS:
+      bat::print("LSM6DS_GYRO_RANGE_250_DPS");
+      break;
+    case LSM6DS_GYRO_RANGE_500_DPS:
+      bat::print("LSM6DS_GYRO_RANGE_500_DPS");
+      break;
+    case LSM6DS_GYRO_RANGE_1000_DPS:
+      bat::print("LSM6DS_GYRO_RANGE_1000_DPS");
+      break;
+    case LSM6DS_GYRO_RANGE_2000_DPS:
+      bat::print("LSM6DS_GYRO_RANGE_2000_DPS");
+      break;
+    }
+  }
+
+  if (not Status.lis3mdl) {
+    bat::print("lis3mdl init failed");
+  }
 
   Bluefruit.printInfo();
   Bluefruit.Periph.printInfo();
@@ -81,43 +118,58 @@ bool move2(int8_t x, int8_t y) {
 }
 
 void loop() {
+  first_print();
+
   auto* con = Bluefruit.Connection(Bluefruit.connHandle());
   if (con->getConnectionInterval() > 12) {
-    bat::print(" ... requesting faster connection, ", con->getConnectionInterval() * 1.25);
+    if (Serial) {
+      bat::print(" ... requesting faster connection, ", con->getConnectionInterval() * 1.25);
+    }
     con->requestConnectionParameter(6);
   }
 
-  float x_sensitivity = 4000, y_sensitivity = 4000;
+  static float x_sensitivity = 4000, y_sensitivity = 4000;
   if (Serial.available()) {
-    x_sensitivity = Serial.parseInt();
-    y_sensitivity = Serial.parseInt();
+    int x = Serial.parseInt(), y = Serial.parseInt();
+
+    if (x > 100 and y > 100) {
+      if (Serial) {
+        bat::print("Setting x,y sensitivity ", x, ", ", y);
+      }
+      x_sensitivity = x;
+      y_sensitivity = y;
+    }
   }
 
-  Eigen::Vector3<float> acc, gyr, mag;
+  Eigen::Vector3<float> acc, gyr;
+  std::optional<Eigen::Vector3<float>> mag;
   sensors_event_t acc_e, gyro_e, temp_e, mag_e;
   lsm6ds33.getEvent(&acc_e, &gyro_e, &temp_e);
   acc = Eigen::Vector3<float>{ acc_e.acceleration.x, acc_e.acceleration.y, acc_e.acceleration.z };
   gyr = Eigen::Vector3<float>{ gyro_e.gyro.x, gyro_e.gyro.y, gyro_e.gyro.z };
+  // lis3mdl.getEvent(&mag_e);
+  // mag = Eigen::Vector3<float>{ mag_e.magnetic.x, mag_e.magnetic.y, mag_e.magnetic.z };
   
   // TODO try just accumulating rotations with no orientation tracking;
   // that might be usable and more predictable. I never want this to be
   // confused about the sign or pitch or yaw
 
   static Eigen::Quaternion<float> orientation{ 1, 0, 0, 0 };
+  static float gyr_z = 0;
 
   const bat::Vector3<float> acc_offset{ 0.395, -0.193, 0.243 };
   const bat::Vector3<float> gyr_offset{ 0.113555, -0.098932, -0.117986 };
 
   static auto last_update = micros();
-  update(&orientation, (gyr - gyr_offset) * (micros() - last_update) / 1'000'000.F);
+  bat::Vector3<float> gyr_step = (gyr - gyr_offset) * (micros() - last_update) / 1'000'000.F;
+  update(&orientation, gyr_step);
   last_update = micros();
 
-  if (false) {
-    lis3mdl.getEvent(&mag_e);
-    mag = Eigen::Vector3<float>{ mag_e.magnetic.x, mag_e.magnetic.y, mag_e.magnetic.z };
-    correct(&orientation, acc - acc_offset, mag);
-  }
-  correct(&orientation, acc - acc_offset, {});
+  correct(&orientation, acc - acc_offset, mag);
+
+  gyr_z += gyr_step[2];
+
+  if (disabled) return;
 
   static auto last_hid = millis();
   if (millis() - last_hid < 7) return;
@@ -138,6 +190,7 @@ void loop() {
 
   auto pitch = delta.dot(pitch_axis);
   pitch = delta[0];
+  pitch = gyr_z * 180 / M_PI;
 
   auto x = -yaw * x_sensitivity / 90;
   auto y = pitch * y_sensitivity / 90;
@@ -148,4 +201,5 @@ void loop() {
   if (not move2(x, y)) return;
 
   last_orientation = orientation;
+  gyr_z = 0;
 }
